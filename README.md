@@ -1,6 +1,17 @@
 # glTF-glb-converter
+
 Developed to bridge the gap between RealityScan and Nomad Sculpt. This is a fully client-side web application that converts glTF folders into a single GLB file without uploading any data.
 
+## 🚀 [Open App / アプリを開く](https://maruimaru.github.io/glTF-glb-converter/)
+
+[![Open in Browser](https://img.shields.io/badge/Launch-App-orange?style=for-the-badge&logo=googlechrome&logoColor=white)](https://maruimaru.github.io/glTF-glb-converter/)
+
+---
+
+## glTF → GLB コンバーター
+
+ブラウザだけで動く **glTF → GLB 変換ツール** です。
+フォルダを選択するだけで、Nomad Sculpt などのアプリで直接開ける `.glb` ファイルを生成できます。
 
 # glTF → GLB コンバーター
 
