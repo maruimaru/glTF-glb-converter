@@ -1,0 +1,1107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>glTF → GLB Converter</title>
+  <style>
+    :root {
+      --bg:         #0f1117;
+      --surface:    #1a1d27;
+      --surface2:   #242837;
+      --accent:     #4f9cf9;
+      --text:       #e1e4f0;
+      --text-dim:   #8892a4;
+      --success:    #4caf87;
+      --warning:    #f0a843;
+      --error:      #ef5350;
+      --border:     #2e3446;
+    }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      padding: 24px 20px 48px;
+    }
+
+    /* ── Header ── */
+    header { text-align: center; margin-bottom: 32px; }
+    header h1 {
+      font-size: 2rem; font-weight: 700;
+      background: linear-gradient(135deg, var(--accent), #8b5cf6);
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    header p { color: var(--text-dim); margin-top: 6px; font-size: 0.9rem; }
+
+    /* ── Grid ── */
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+    @media (max-width: 760px) { .grid { grid-template-columns: 1fr; } }
+    .col-full { grid-column: 1 / -1; }
+
+    /* ── Card ── */
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 22px 24px;
+    }
+    .card-title {
+      font-size: 0.78rem; font-weight: 700;
+      color: var(--text-dim);
+      text-transform: uppercase; letter-spacing: .07em;
+      margin-bottom: 16px;
+    }
+
+    /* ── Drop zone ── */
+    #drop-zone {
+      border: 2px dashed var(--border);
+      border-radius: 10px;
+      padding: 44px 20px;
+      text-align: center;
+      cursor: pointer;
+      transition: border-color .2s, background .2s;
+    }
+    #drop-zone:hover, #drop-zone.drag-over {
+      border-color: var(--accent);
+      background: rgba(79,156,249,.06);
+    }
+    #drop-zone .dz-icon { font-size: 2.8rem; }
+    #drop-zone p { color: var(--text-dim); margin: 10px 0 14px; font-size: .9rem; line-height: 1.5; }
+    #file-input { display: none; }
+
+    /* ── File badges ── */
+    #file-info { margin-top: 14px; }
+    .badge {
+      display: inline-flex; align-items: center; gap: 4px;
+      background: var(--surface2); border: 1px solid var(--border);
+      border-radius: 5px; padding: 2px 8px; margin: 2px;
+      font-size: .75rem;
+    }
+    .file-summary { font-size: .75rem; color: var(--text-dim); margin-top: 8px; }
+
+    /* ── Options ── */
+    .opt-row {
+      display: flex; align-items: center; gap: 14px;
+      padding: 11px 0;
+      border-bottom: 1px solid var(--border);
+    }
+    .opt-row:last-of-type { border-bottom: none; }
+    .opt-label { flex: 1; }
+    .opt-label strong { font-size: .9rem; }
+    .opt-label span { display: block; font-size: .78rem; color: var(--text-dim); margin-top: 2px; }
+
+    /* Toggle */
+    .toggle { position: relative; width: 44px; height: 24px; flex-shrink: 0; }
+    .toggle input { opacity: 0; width: 0; height: 0; }
+    .toggle-slider {
+      position: absolute; inset: 0;
+      background: var(--border); border-radius: 24px; cursor: pointer;
+      transition: background .25s;
+    }
+    .toggle-slider::before {
+      content: ''; position: absolute;
+      width: 18px; height: 18px; left: 3px; top: 3px;
+      background: white; border-radius: 50%;
+      transition: transform .25s;
+    }
+    .toggle input:checked + .toggle-slider { background: var(--accent); }
+    .toggle input:checked + .toggle-slider::before { transform: translateX(20px); }
+
+    select, input[type=number] {
+      background: var(--surface2); border: 1px solid var(--border);
+      color: var(--text); border-radius: 6px;
+      padding: 6px 10px; font-size: .85rem;
+    }
+    select:focus, input[type=number]:focus { outline: none; border-color: var(--accent); }
+    #resize-size-row { transition: opacity .2s; }
+
+    /* ── Buttons ── */
+    .btn {
+      display: inline-flex; align-items: center; gap: 7px;
+      padding: 9px 18px; border-radius: 8px; border: none;
+      cursor: pointer; font-size: .88rem; font-weight: 600;
+      transition: all .18s;
+    }
+    .btn:disabled { opacity: .45; cursor: not-allowed; }
+    .btn-primary { background: var(--accent); color: #fff; }
+    .btn-primary:not(:disabled):hover { background: #3b85e0; }
+    .btn-secondary {
+      background: var(--surface2); color: var(--text);
+      border: 1px solid var(--border);
+    }
+    .btn-secondary:not(:disabled):hover { border-color: var(--accent); color: var(--accent); }
+    .btn-success { background: var(--success); color: #fff; }
+    .btn-success:not(:disabled):hover { background: #3d9a70; }
+
+    .actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 18px; }
+
+    /* ── Preview canvas ── */
+    #preview-canvas {
+      width: 100%; aspect-ratio: 16/9;
+      border-radius: 8px; display: block;
+      background: #0a0c14;
+    }
+    .preview-hint {
+      text-align: center; color: var(--text-dim);
+      font-size: .8rem; margin-top: 8px;
+    }
+
+    /* ── Log ── */
+    #log {
+      font-family: 'JetBrains Mono', 'Courier New', monospace;
+      font-size: .78rem; line-height: 1.6;
+      background: var(--surface2); border-radius: 8px;
+      padding: 12px 14px; max-height: 180px; overflow-y: auto;
+    }
+    .l-info    { color: var(--text-dim); }
+    .l-success { color: var(--success); }
+    .l-warn    { color: var(--warning); }
+    .l-error   { color: var(--error); }
+
+    /* ── Progress bar ── */
+    #progress-bar-wrap {
+      height: 4px; background: var(--border);
+      border-radius: 2px; margin-top: 12px;
+      overflow: hidden; display: none;
+    }
+    #progress-bar {
+      height: 100%; width: 0%;
+      background: linear-gradient(90deg, var(--accent), #8b5cf6);
+      transition: width .3s;
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>🔷 glTF → GLB Converter</h1>
+  <p>Fully client-side · No uploads · Optimised for Nomad Sculpt &amp; VR streaming</p>
+</header>
+
+<div class="grid">
+
+  <!-- ── Upload ── -->
+  <div class="card">
+    <div class="card-title">📁 Input Files</div>
+    <div id="drop-zone">
+      <div class="dz-icon">📂</div>
+      <p>Drag &amp; drop a glTF folder here<br>or click to select files</p>
+      <button class="btn btn-secondary" type="button"
+              onclick="document.getElementById('file-input').click()">
+        Choose Files
+      </button>
+    </div>
+    <input type="file" id="file-input" multiple
+           accept=".gltf,.bin,.png,.jpg,.jpeg,.webp,.ktx2" />
+    <div id="file-info"></div>
+  </div>
+
+  <!-- ── Options ── -->
+  <div class="card">
+    <div class="card-title">⚙️ Optimisation Options</div>
+
+    <div class="opt-row">
+      <div class="opt-label">
+        <strong>Resize Textures</strong>
+        <span>Downscale textures that exceed the size limit</span>
+      </div>
+      <label class="toggle">
+        <input type="checkbox" id="opt-resize" checked />
+        <div class="toggle-slider"></div>
+      </label>
+    </div>
+
+    <div class="opt-row" id="resize-size-row">
+      <div class="opt-label">
+        <strong>Max Texture Size</strong>
+        <span>Textures larger than this will be downscaled</span>
+      </div>
+      <select id="opt-max-size">
+        <option value="512">512 px</option>
+        <option value="1024">1 K (1024 px)</option>
+        <option value="2048" selected>2 K (2048 px)</option>
+        <option value="4096">4 K (4096 px)</option>
+      </select>
+    </div>
+
+    <div class="opt-row">
+      <div class="opt-label">
+        <strong>Draco Mesh Compression</strong>
+        <span>Compress mesh geometry — adds KHR_draco_mesh_compression</span>
+      </div>
+      <label class="toggle">
+        <input type="checkbox" id="opt-draco" />
+        <div class="toggle-slider"></div>
+      </label>
+    </div>
+
+    <div class="opt-row">
+      <div class="opt-label">
+        <strong>Embed Metadata</strong>
+        <span>Conversion timestamp, license &amp; generator tag</span>
+      </div>
+      <label class="toggle">
+        <input type="checkbox" id="opt-meta" checked />
+        <div class="toggle-slider"></div>
+      </label>
+    </div>
+
+    <div class="actions">
+      <button class="btn btn-secondary" id="btn-preview" disabled>👁 Preview</button>
+      <button class="btn btn-primary"   id="btn-convert" disabled>⚡ Convert to GLB</button>
+      <button class="btn btn-success"   id="btn-download" disabled style="display:none">
+        ⬇ Download GLB
+      </button>
+    </div>
+
+    <div id="progress-bar-wrap"><div id="progress-bar"></div></div>
+  </div>
+
+  <!-- ── Preview ── -->
+  <div class="card col-full">
+    <div class="card-title">👁 3D Preview</div>
+    <canvas id="preview-canvas"></canvas>
+    <p class="preview-hint">Click <strong>Preview</strong> to render the model · Drag to orbit · Scroll to zoom</p>
+  </div>
+
+  <!-- ── Log ── -->
+  <div class="card col-full">
+    <div class="card-title">📋 Log</div>
+    <div id="log"><div class="l-info">Ready. Select glTF files to begin.</div></div>
+  </div>
+
+</div><!-- /grid -->
+
+<!-- ─────────────────────────────────────────────
+     Three.js via importmap (ES modules, no build step)
+     ───────────────────────────────────────────── -->
+<script type="importmap">
+{
+  "imports": {
+    "three":          "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/":  "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { GLTFLoader }    from 'three/addons/loaders/GLTFLoader.js';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { DRACOLoader }   from 'three/addons/loaders/DRACOLoader.js';
+
+/* ════════════════════════════════════════════════════
+   STATE
+   ════════════════════════════════════════════════════ */
+let uploadedFiles = [];          // File[]
+let fileMap = new Map();         // basename → File
+let convertedGLB = null;         // ArrayBuffer | null
+let downloadUrl = null;          // revokable object-URL
+
+/* ════════════════════════════════════════════════════
+   THREE.JS SCENE
+   ════════════════════════════════════════════════════ */
+const canvas   = document.getElementById('preview-canvas');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.outputColorSpace  = THREE.SRGBColorSpace;
+renderer.toneMapping       = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.1;
+
+const scene  = new THREE.Scene();
+scene.background = new THREE.Color(0x0a0c14);
+
+const camera = new THREE.PerspectiveCamera(50, 1, 0.01, 1000);
+camera.position.set(2, 1.5, 2);
+
+const controls = new OrbitControls(camera, canvas);
+controls.enableDamping  = true;
+controls.dampingFactor  = 0.06;
+controls.minDistance    = 0.05;
+
+// Lighting
+scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+const sun = new THREE.DirectionalLight(0xffffff, 1.8);
+sun.position.set(5, 10, 7);
+scene.add(sun);
+const fill = new THREE.DirectionalLight(0x8080ff, 0.4);
+fill.position.set(-5, -2, -5);
+scene.add(fill);
+
+// Grid
+scene.add(new THREE.GridHelper(10, 20, 0x2e3446, 0x1a1d27));
+
+// Resize handling
+function syncCanvasSize() {
+  const w = canvas.clientWidth, h = canvas.clientHeight;
+  if (renderer.domElement.width !== w || renderer.domElement.height !== h) {
+    renderer.setSize(w, h, false);
+    camera.aspect = w / h;
+    camera.updateProjectionMatrix();
+  }
+}
+new ResizeObserver(syncCanvasSize).observe(canvas);
+syncCanvasSize();
+
+// Render loop
+(function loop() { requestAnimationFrame(loop); controls.update(); renderer.render(scene, camera); })();
+
+/* ════════════════════════════════════════════════════
+   LOGGING
+   ════════════════════════════════════════════════════ */
+const logEl = document.getElementById('log');
+function log(msg, type = 'info') {
+  const d = document.createElement('div');
+  d.className = `l-${type}`;
+  d.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+  logEl.appendChild(d);
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+/* ════════════════════════════════════════════════════
+   FILE HANDLING
+   ════════════════════════════════════════════════════ */
+const dropZone  = document.getElementById('drop-zone');
+const fileInput = document.getElementById('file-input');
+const fileInfo  = document.getElementById('file-info');
+
+dropZone.addEventListener('dragover',  e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+dropZone.addEventListener('dragleave', ()  => dropZone.classList.remove('drag-over'));
+dropZone.addEventListener('drop',      e  => { e.preventDefault(); dropZone.classList.remove('drag-over'); handleFiles(e.dataTransfer.files); });
+fileInput.addEventListener('change',   e  => handleFiles(e.target.files));
+
+function handleFiles(list) {
+  uploadedFiles = Array.from(list);
+  fileMap = new Map();
+
+  for (const f of uploadedFiles) {
+    fileMap.set(f.name, f);
+    if (f.webkitRelativePath) {
+      fileMap.set(f.webkitRelativePath, f);
+      // Also store bare basename as fallback
+      const parts = f.webkitRelativePath.split('/');
+      fileMap.set(parts[parts.length - 1], f);
+    }
+  }
+
+  const gltfFiles  = uploadedFiles.filter(f => f.name.endsWith('.gltf'));
+  const binFiles   = uploadedFiles.filter(f => f.name.endsWith('.bin'));
+  const texFiles   = uploadedFiles.filter(f => /\.(png|jpe?g|webp|ktx2)$/i.test(f.name));
+
+  if (!gltfFiles.length) {
+    log('No .gltf file found — please include the .gltf file in your selection.', 'warn');
+    return;
+  }
+
+  // Render badges
+  const html = `
+    <div style="margin-top:12px">
+      ${gltfFiles .map(f => `<span class="badge">🔵 ${f.name}</span>`).join('')}
+      ${binFiles  .map(f => `<span class="badge">⚫ ${f.name}</span>`).join('')}
+      ${texFiles  .map(f => `<span class="badge">🟡 ${f.name}</span>`).join('')}
+    </div>
+    <div class="file-summary">
+      ${uploadedFiles.length} file(s) · ${fmtSize(uploadedFiles.reduce((s, f) => s + f.size, 0))}
+    </div>`;
+  fileInfo.innerHTML = html;
+
+  document.getElementById('btn-preview').disabled = false;
+  document.getElementById('btn-convert').disabled = false;
+
+  log(`Loaded ${uploadedFiles.length} file(s): ${gltfFiles.length} glTF, ${binFiles.length} bin, ${texFiles.length} textures`, 'success');
+}
+
+function fmtSize(bytes) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1048576) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / 1048576).toFixed(1)} MB`;
+}
+
+/* ════════════════════════════════════════════════════
+   THREE.JS PREVIEW
+   ════════════════════════════════════════════════════ */
+let previewGroup   = null;
+let previewBlobUrls = [];
+
+document.getElementById('btn-preview').addEventListener('click', loadPreview);
+
+async function loadPreview() {
+  // Tear down previous model
+  if (previewGroup) { scene.remove(previewGroup); previewGroup = null; }
+  previewBlobUrls.forEach(u => URL.revokeObjectURL(u));
+  previewBlobUrls = [];
+
+  const gltfFile = findGltfFile();
+  if (!gltfFile) { log('No .gltf file found.', 'error'); return; }
+
+  log('Loading preview…');
+
+  // Build blob-URL map for all uploaded files
+  const blobMap = new Map();
+  for (const [name, file] of fileMap) {
+    const url = URL.createObjectURL(file);
+    blobMap.set(name, url);
+    previewBlobUrls.push(url);
+  }
+
+  // LoadingManager remaps relative URIs to blob URLs
+  const mgr = new THREE.LoadingManager();
+  mgr.setURLModifier(url => {
+    const decoded  = decodeURIComponent(url);
+    const basename = decoded.split('/').pop();
+    return blobMap.get(basename) || blobMap.get(decoded) || url;
+  });
+
+  // DRACOLoader for models that already use Draco
+  const dracoLoader = new DRACOLoader(mgr);
+  dracoLoader.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.7/');
+
+  const loader = new GLTFLoader(mgr);
+  loader.setDRACOLoader(dracoLoader);
+
+  try {
+    const gltf = await new Promise((res, rej) =>
+      loader.load(blobMap.get(gltfFile.name), res, undefined, rej));
+
+    previewGroup = gltf.scene;
+    scene.add(previewGroup);
+
+    // Auto-fit camera
+    const box    = new THREE.Box3().setFromObject(previewGroup);
+    const center = box.getCenter(new THREE.Vector3());
+    const size   = box.getSize(new THREE.Vector3());
+    const maxDim = Math.max(size.x, size.y, size.z) || 1;
+
+    controls.target.copy(center);
+    camera.position.copy(center).add(
+      new THREE.Vector3(maxDim * 1.4, maxDim * 0.6, maxDim * 1.4));
+    camera.near = maxDim / 200;
+    camera.far  = maxDim * 100;
+    camera.updateProjectionMatrix();
+    controls.update();
+
+    log('Preview ready.', 'success');
+  } catch (err) {
+    log(`Preview failed: ${err.message}`, 'error');
+    console.error(err);
+  }
+}
+
+/* ════════════════════════════════════════════════════
+   UTILITIES
+   ════════════════════════════════════════════════════ */
+function findGltfFile() {
+  return uploadedFiles.find(f => f.name.endsWith('.gltf')) || null;
+}
+
+function resolveFile(uri) {
+  const decoded  = decodeURIComponent(uri);
+  const basename = decoded.split('/').pop();
+  return fileMap.get(basename) || fileMap.get(decoded) || fileMap.get(uri) || null;
+}
+
+function readText(file) {
+  return new Promise((res, rej) => {
+    const r = new FileReader();
+    r.onload = e => res(e.target.result);
+    r.onerror = rej;
+    r.readAsText(file);
+  });
+}
+
+function readArrayBuffer(file) {
+  return new Promise((res, rej) => {
+    const r = new FileReader();
+    r.onload = e => res(e.target.result);
+    r.onerror = rej;
+    r.readAsArrayBuffer(file);
+  });
+}
+
+function b64toBuffer(b64) {
+  const bin   = atob(b64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return bytes.buffer;
+}
+
+function guessMime(uri) {
+  const ext = uri.split('.').pop().toLowerCase();
+  return { png:'image/png', jpg:'image/jpeg', jpeg:'image/jpeg',
+           webp:'image/webp', ktx2:'image/ktx2' }[ext] || 'image/jpeg';
+}
+
+function align4(n) { return Math.ceil(n / 4) * 4; }
+
+/* ── Texture resize using OffscreenCanvas / regular Canvas ── */
+async function resizeBlob(blob, maxPx) {
+  // KTX2 cannot be decoded by the browser canvas — skip silently
+  if (blob.type === 'image/ktx2') return blob;
+
+  let bitmap;
+  try { bitmap = await createImageBitmap(blob); }
+  catch { return blob; } // unsupported format — pass through
+
+  const { width, height } = bitmap;
+  const scale = Math.min(1, maxPx / Math.max(width, height));
+  if (scale >= 1) { bitmap.close?.(); return blob; }
+
+  const nw = Math.max(1, Math.round(width  * scale));
+  const nh = Math.max(1, Math.round(height * scale));
+  const mime = blob.type === 'image/png' ? 'image/png' : 'image/jpeg';
+
+  let resultBlob;
+  if (typeof OffscreenCanvas !== 'undefined') {
+    const oc  = new OffscreenCanvas(nw, nh);
+    const ctx = oc.getContext('2d');
+    ctx.drawImage(bitmap, 0, 0, nw, nh);
+    bitmap.close?.();
+    resultBlob = await oc.convertToBlob({ type: mime, quality: 0.85 });
+  } else {
+    // Fallback: regular <canvas>
+    const c   = document.createElement('canvas');
+    c.width   = nw; c.height = nh;
+    const ctx = c.getContext('2d');
+    ctx.drawImage(bitmap, 0, 0, nw, nh);
+    bitmap.close?.();
+    resultBlob = await new Promise(res => c.toBlob(res, mime, 0.85));
+  }
+  return resultBlob;
+}
+
+/* ════════════════════════════════════════════════════
+   GLB PACKING
+   ════════════════════════════════════════════════════ */
+function packGLB(jsonStr, binBuffer) {
+  const enc     = new TextEncoder();
+  const jsonRaw = enc.encode(jsonStr);
+  const jLen    = align4(jsonRaw.length);
+  const jPad    = new Uint8Array(jLen);
+  jPad.set(jsonRaw);
+  for (let i = jsonRaw.length; i < jLen; i++) jPad[i] = 0x20; // space padding
+
+  const binRaw  = binBuffer ? new Uint8Array(binBuffer) : new Uint8Array(0);
+  const hasBin  = binRaw.byteLength > 0;
+  const bLen    = hasBin ? align4(binRaw.byteLength) : 0;
+  const bPad    = new Uint8Array(bLen);
+  bPad.set(binRaw); // zero-padded by default
+
+  const total = 12 + 8 + jLen + (hasBin ? 8 + bLen : 0);
+  const glb   = new ArrayBuffer(total);
+  const dv    = new DataView(glb);
+  const u8    = new Uint8Array(glb);
+  let   off   = 0;
+
+  dv.setUint32(off, 0x46546C67, true); off += 4; // magic 'glTF'
+  dv.setUint32(off, 2,          true); off += 4; // version
+  dv.setUint32(off, total,      true); off += 4; // length
+
+  // JSON chunk
+  dv.setUint32(off, jLen,       true); off += 4;
+  dv.setUint32(off, 0x4E4F534A, true); off += 4; // 'JSON'
+  u8.set(jPad, off); off += jLen;
+
+  // BIN chunk
+  if (hasBin) {
+    dv.setUint32(off, bLen,       true); off += 4;
+    dv.setUint32(off, 0x004E4942, true); off += 4; // 'BIN\0'
+    u8.set(bPad, off);
+  }
+  return glb;
+}
+
+/* ════════════════════════════════════════════════════
+   CORE glTF → GLB CONVERSION
+   ════════════════════════════════════════════════════ */
+async function convertToGLB({ resizeTextures, maxPx, addMeta }) {
+  setProgress(5);
+  const gltfFile = findGltfFile();
+  if (!gltfFile) throw new Error('No .gltf file found.');
+
+  log('Parsing glTF JSON…');
+  const origGltf = JSON.parse(await readText(gltfFile));
+  // Deep-clone so we can freely mutate
+  const json = JSON.parse(JSON.stringify(origGltf));
+  setProgress(10);
+
+  /* ── 1. Load raw binary buffers ── */
+  log('Loading binary buffers…');
+  const rawBuffers = [];
+  for (const buf of (json.buffers || [])) {
+    if (!buf.uri) {
+      rawBuffers.push(null);
+    } else if (buf.uri.startsWith('data:')) {
+      rawBuffers.push(b64toBuffer(buf.uri.split(',')[1]));
+    } else {
+      const f = resolveFile(buf.uri);
+      if (!f) throw new Error(`Buffer file not found: ${buf.uri}`);
+      rawBuffers.push(await readArrayBuffer(f));
+    }
+  }
+  setProgress(20);
+
+  /* ── 2. Collect binary pieces + remap bufferViews ── */
+  // pieces[i] = { data: Uint8Array, bvIdx: number }
+  const pieces        = [];
+  const newBVs        = [];   // new bufferViews array
+  const bvIdxMap      = new Map(); // old idx → new idx
+
+  function pushPiece(data) {
+    const newIdx = newBVs.length;
+    newBVs.push({ buffer: 0, byteOffset: 0, byteLength: data.byteLength });
+    pieces.push({ data, bvIdx: newIdx });
+    return newIdx;
+  }
+
+  // Re-embed existing bufferViews
+  const origBVs = origGltf.bufferViews || [];
+  for (let i = 0; i < origBVs.length; i++) {
+    const bv  = origBVs[i];
+    const raw = rawBuffers[bv.buffer];
+    if (!raw) { bvIdxMap.set(i, i); continue; }
+
+    const srcOffset = bv.byteOffset || 0;
+    const slice     = new Uint8Array(raw, srcOffset, bv.byteLength);
+    const copy      = new Uint8Array(slice); // detach from original
+
+    const newIdx = newBVs.length;
+    bvIdxMap.set(i, newIdx);
+
+    const newBV = { buffer: 0, byteOffset: 0, byteLength: bv.byteLength };
+    if (bv.byteStride !== undefined) newBV.byteStride = bv.byteStride;
+    if (bv.target     !== undefined) newBV.target     = bv.target;
+    if (bv.name       !== undefined) newBV.name       = bv.name;
+    newBVs.push(newBV);
+    pieces.push({ data: copy, bvIdx: newIdx });
+  }
+  setProgress(35);
+
+  /* ── 3. Process images ── */
+  log('Processing images…');
+  const images      = origGltf.images || [];
+  const totalImages = images.length;
+
+  for (let i = 0; i < images.length; i++) {
+    const img = images[i];
+    setProgress(35 + Math.round(30 * (i / Math.max(totalImages, 1))));
+
+    if (img.uri) {
+      /* ── Image is an external file or data-URI ── */
+      let blob, mime;
+
+      if (img.uri.startsWith('data:')) {
+        const [hdr, b64] = img.uri.split(',');
+        mime = hdr.match(/data:([^;]+)/)[1];
+        blob = new Blob([b64toBuffer(b64)], { type: mime });
+      } else {
+        const f = resolveFile(img.uri);
+        if (!f) throw new Error(`Image not found: ${img.uri}`);
+        mime = f.type || guessMime(img.uri);
+        blob = f;
+      }
+
+      if (resizeTextures) {
+        log(`  Resizing ${img.uri.split('/').pop()} → max ${maxPx}px…`);
+        blob = await resizeBlob(blob, maxPx);
+      }
+
+      const ab   = await blob.arrayBuffer();
+      const data = new Uint8Array(ab);
+      const bvIdx = pushPiece(data);
+      json.images[i] = { bufferView: bvIdx, mimeType: blob.type || mime };
+
+    } else if (img.bufferView !== undefined) {
+      /* ── Image is embedded in a bufferView ── */
+      if (resizeTextures) {
+        const origBV = origBVs[img.bufferView];
+        if (origBV) {
+          const raw  = rawBuffers[origBV.buffer];
+          if (raw) {
+            const srcOff = origBV.byteOffset || 0;
+            const mime   = img.mimeType || 'image/jpeg';
+            let   blob   = new Blob([new Uint8Array(raw, srcOff, origBV.byteLength)], { type: mime });
+            log(`  Resizing embedded image ${i} → max ${maxPx}px…`);
+            blob = await resizeBlob(blob, maxPx);
+            const data  = new Uint8Array(await blob.arrayBuffer());
+            const bvIdx = pushPiece(data);
+            json.images[i] = { bufferView: bvIdx, mimeType: blob.type || mime };
+            continue;
+          }
+        }
+      }
+      // No resize or fallback: just remap the bufferView index
+      json.images[i] = {
+        ...json.images[i],
+        bufferView: bvIdxMap.get(img.bufferView) ?? img.bufferView
+      };
+    }
+  }
+  setProgress(65);
+
+  /* ── 4. Compute byte offsets (2nd pass) ── */
+  let offset = 0;
+  for (const p of pieces) {
+    newBVs[p.bvIdx].byteOffset = offset;
+    offset += align4(p.data.byteLength);
+  }
+  const totalBin = offset;
+
+  /* ── 5. Build merged binary buffer ── */
+  const merged = new Uint8Array(totalBin);
+  offset = 0;
+  for (const p of pieces) {
+    merged.set(p.data, offset);
+    offset += align4(p.data.byteLength);
+  }
+  setProgress(75);
+
+  /* ── 6. Update JSON references ── */
+  for (const acc of (json.accessors || [])) {
+    if (acc.bufferView !== undefined)
+      acc.bufferView = bvIdxMap.get(acc.bufferView) ?? acc.bufferView;
+    const sp = acc.sparse;
+    if (sp?.indices?.bufferView !== undefined)
+      sp.indices.bufferView = bvIdxMap.get(sp.indices.bufferView) ?? sp.indices.bufferView;
+    if (sp?.values?.bufferView !== undefined)
+      sp.values.bufferView  = bvIdxMap.get(sp.values.bufferView)  ?? sp.values.bufferView;
+  }
+
+  // Re-map bufferViews referenced by KHR_draco_mesh_compression (if already in source)
+  for (const mesh of (json.meshes || [])) {
+    for (const prim of (mesh.primitives || [])) {
+      const draco = prim.extensions?.KHR_draco_mesh_compression;
+      if (draco?.bufferView !== undefined)
+        draco.bufferView = bvIdxMap.get(draco.bufferView) ?? draco.bufferView;
+    }
+  }
+
+  /* ── 7. Finalise JSON ── */
+  json.bufferViews = newBVs.length ? newBVs : undefined;
+  json.buffers     = totalBin > 0 ? [{ byteLength: totalBin }] : [];
+
+  // Metadata
+  if (addMeta) {
+    if (!json.extras) json.extras = {};
+    json.extras.conversionTimestamp = new Date().toISOString();
+    json.extras.license             = 'MIT';
+    json.extras.convertedBy        =
+      'glTF-glb-converter (https://github.com/maruimaru/glTF-glb-converter)';
+    if (!json.asset) json.asset = { version: '2.0' };
+    json.asset.generator = 'glTF-glb-converter v1.0';
+    log('Metadata embedded.', 'info');
+  }
+  if (!json.asset) json.asset = { version: '2.0' };
+
+  setProgress(85);
+  log('Packing GLB…');
+  return packGLB(JSON.stringify(json), merged.buffer);
+}
+
+/* ════════════════════════════════════════════════════
+   DRACO COMPRESSION
+   ════════════════════════════════════════════════════ */
+let dracoEncoderModule = null;
+
+async function loadDracoEncoder() {
+  if (dracoEncoderModule) return dracoEncoderModule;
+  return new Promise((resolve, reject) => {
+    const s    = document.createElement('script');
+    s.src      = 'https://cdn.jsdelivr.net/npm/draco3d@1.5.7/draco_encoder.js';
+    s.onload   = () => {
+      if (typeof DracoEncoderModule === 'function') {
+        // eslint-disable-next-line no-undef
+        DracoEncoderModule().then(m => { dracoEncoderModule = m; resolve(m); }).catch(reject);
+      } else {
+        reject(new Error('DracoEncoderModule not available on global scope.'));
+      }
+    };
+    s.onerror  = () => reject(new Error('Failed to load Draco encoder from CDN.'));
+    document.head.appendChild(s);
+  });
+}
+
+// glTF component-type helpers
+const COMPONENT_SIZES = { 5120:1, 5121:1, 5122:2, 5123:2, 5125:4, 5126:4 };
+const COMPONENT_TYPES = {
+  5120: Int8Array, 5121: Uint8Array,
+  5122: Int16Array, 5123: Uint16Array,
+  5125: Uint32Array, 5126: Float32Array
+};
+const NUM_COMPONENTS = { SCALAR:1, VEC2:2, VEC3:3, VEC4:4, MAT2:4, MAT3:9, MAT4:16 };
+
+function dracoAttrType(draco, name) {
+  if (name === 'POSITION')          return draco.POSITION;
+  if (name === 'NORMAL')            return draco.NORMAL;
+  if (name.startsWith('TEXCOORD_')) return draco.TEX_COORD;
+  if (name.startsWith('COLOR_'))    return draco.COLOR;
+  return draco.GENERIC;
+}
+
+/** Parse a GLB ArrayBuffer → { json, bin } */
+function parseGLB(glbBuffer) {
+  const dv  = new DataView(glbBuffer);
+  const magic = dv.getUint32(0, true);
+  if (magic !== 0x46546C67) throw new Error('Not a valid GLB.');
+
+  let off = 12, jsonStr = null, bin = null;
+  while (off < glbBuffer.byteLength) {
+    const cLen  = dv.getUint32(off,     true);
+    const cType = dv.getUint32(off + 4, true);
+    const cData = glbBuffer.slice(off + 8, off + 8 + cLen);
+    off += 8 + cLen;
+    if (cType === 0x4E4F534A) jsonStr = new TextDecoder().decode(cData);
+    else if (cType === 0x004E4942) bin = new Uint8Array(cData);
+  }
+  return { json: JSON.parse(jsonStr), bin: bin || new Uint8Array(0) };
+}
+
+async function applyDracoCompression(glbBuffer) {
+  log('Loading Draco encoder…', 'info');
+  const draco = await loadDracoEncoder();
+  log('Draco encoder ready.', 'success');
+
+  const { json, bin } = parseGLB(glbBuffer);
+
+  // Extra binary pieces to append after the existing BIN
+  const extraPieces = [];
+  let   extraOffset = align4(bin.byteLength); // offset inside the merged buffer
+
+  function readAccessorData(accessorIdx) {
+    const acc = json.accessors[accessorIdx];
+    if (acc.bufferView === undefined) return null;
+    const bv       = json.bufferViews[acc.bufferView];
+    const bvOff    = (bv.byteOffset  || 0) + (acc.byteOffset || 0);
+    const nComp    = NUM_COMPONENTS[acc.type]  || 1;
+    const TypedArr = COMPONENT_TYPES[acc.componentType] || Float32Array;
+    return new TypedArr(bin.buffer, bin.byteOffset + bvOff, acc.count * nComp);
+  }
+
+  let primCount = 0;
+  for (const mesh of (json.meshes || [])) {
+    for (const prim of (mesh.primitives || [])) {
+      if (prim.extensions?.KHR_draco_mesh_compression) continue; // already compressed
+
+      const encoder      = new draco.Encoder();
+      const meshBuilder  = new draco.MeshBuilder();
+      const dracoMesh    = new draco.Mesh();
+      const dracoAttrIds = {};
+
+      try {
+        // Indices
+        let numFaces  = 0;
+        let numPoints = 0;
+
+        if (prim.indices !== undefined) {
+          const idxData    = readAccessorData(prim.indices);
+          if (!idxData) continue;
+          numFaces  = idxData.length / 3;
+          // Find max vertex index to determine numPoints
+          let maxIdx = 0;
+          for (let k = 0; k < idxData.length; k++) if (idxData[k] > maxIdx) maxIdx = idxData[k];
+          numPoints = maxIdx + 1;
+
+          const int32Idx = new Int32Array(idxData.length);
+          for (let k = 0; k < idxData.length; k++) int32Idx[k] = idxData[k];
+          meshBuilder.AddFacesToMesh(dracoMesh, numFaces, int32Idx);
+        } else {
+          const posAcc  = json.accessors[prim.attributes.POSITION];
+          numPoints = posAcc?.count || 0;
+          numFaces  = Math.floor(numPoints / 3);
+          // Build sequential index buffer
+          const int32Idx = new Int32Array(numPoints);
+          for (let k = 0; k < numPoints; k++) int32Idx[k] = k;
+          meshBuilder.AddFacesToMesh(dracoMesh, numFaces, int32Idx);
+        }
+
+        // Attributes
+        for (const [attrName, accIdx] of Object.entries(prim.attributes)) {
+          const rawData = readAccessorData(accIdx);
+          if (!rawData) continue;
+          const nComp     = NUM_COMPONENTS[json.accessors[accIdx].type] || 3;
+          const floatData = new Float32Array(rawData.length);
+          for (let k = 0; k < rawData.length; k++) floatData[k] = rawData[k];
+
+          const attrId = meshBuilder.AddFloatAttributeToMesh(
+            dracoMesh, dracoAttrType(draco, attrName), numPoints, nComp, floatData, false);
+          dracoAttrIds[attrName] = attrId;
+        }
+
+        // Encoding settings
+        encoder.SetSpeedOptions(5, 5);
+        encoder.SetAttributeQuantization(draco.POSITION,  14);
+        encoder.SetAttributeQuantization(draco.NORMAL,    10);
+        encoder.SetAttributeQuantization(draco.TEX_COORD, 12);
+        encoder.SetAttributeQuantization(draco.COLOR,      8);
+        encoder.SetAttributeQuantization(draco.GENERIC,   12);
+        encoder.SetEncodingMethod(draco.MESH_EDGEBREAKER_ENCODING);
+
+        const encodedBuf = new draco.DracoInt8Array();
+        const encodedLen = encoder.EncodeMeshToDracoBuffer(dracoMesh, encodedBuf);
+
+        if (encodedLen === 0) {
+          log(`  Primitive skipped (encoding returned 0 bytes).`, 'warn');
+          continue;
+        }
+
+        // Extract bytes
+        const output = new Uint8Array(encodedLen);
+        for (let k = 0; k < encodedLen; k++) output[k] = encodedBuf.GetValue(k);
+        draco.destroy(encodedBuf);
+
+        // Store as new bufferView
+        const bvIdx = json.bufferViews.length;
+        json.bufferViews.push({
+          buffer:     0,
+          byteOffset: extraOffset,
+          byteLength: encodedLen
+        });
+        const padded = new Uint8Array(align4(encodedLen));
+        padded.set(output);
+        extraPieces.push(padded);
+        extraOffset += padded.byteLength;
+
+        // Attach extension to primitive
+        if (!prim.extensions) prim.extensions = {};
+        prim.extensions.KHR_draco_mesh_compression = {
+          bufferView: bvIdx,
+          attributes: dracoAttrIds
+        };
+
+        // Accessors for Draco primitives must not reference a bufferView
+        for (const accIdx of Object.values(prim.attributes))
+          delete json.accessors[accIdx].bufferView;
+        if (prim.indices !== undefined)
+          delete json.accessors[prim.indices].bufferView;
+
+        primCount++;
+      } finally {
+        draco.destroy(dracoMesh);
+        draco.destroy(encoder);
+      }
+    }
+  }
+
+  if (primCount === 0) {
+    log('No primitives were Draco-compressed (possible missing data). Returning as-is.', 'warn');
+    return glbBuffer;
+  }
+
+  // Extension declarations
+  if (!json.extensionsUsed)     json.extensionsUsed     = [];
+  if (!json.extensionsRequired) json.extensionsRequired = [];
+  if (!json.extensionsUsed.includes('KHR_draco_mesh_compression'))
+    json.extensionsUsed.push('KHR_draco_mesh_compression');
+  if (!json.extensionsRequired.includes('KHR_draco_mesh_compression'))
+    json.extensionsRequired.push('KHR_draco_mesh_compression');
+
+  // Build merged binary: original bin + extra draco chunks
+  const totalBin = align4(bin.byteLength) + extraPieces.reduce((s, p) => s + p.byteLength, 0);
+  const merged   = new Uint8Array(totalBin);
+  merged.set(bin, 0);
+  let off = align4(bin.byteLength);
+  for (const p of extraPieces) { merged.set(p, off); off += p.byteLength; }
+
+  json.buffers[0].byteLength = totalBin;
+
+  log(`Draco: compressed ${primCount} mesh primitive(s).`, 'success');
+  return packGLB(JSON.stringify(json), merged.buffer);
+}
+
+/* ════════════════════════════════════════════════════
+   PROGRESS BAR
+   ════════════════════════════════════════════════════ */
+const pbWrap = document.getElementById('progress-bar-wrap');
+const pb     = document.getElementById('progress-bar');
+
+function setProgress(pct) {
+  pbWrap.style.display = 'block';
+  pb.style.width       = `${pct}%`;
+}
+function clearProgress() {
+  pbWrap.style.display = 'none';
+  pb.style.width       = '0%';
+}
+
+/* ════════════════════════════════════════════════════
+   CONVERT BUTTON HANDLER
+   ════════════════════════════════════════════════════ */
+const btnConvert  = document.getElementById('btn-convert');
+const btnDownload = document.getElementById('btn-download');
+
+btnConvert.addEventListener('click', async () => {
+  const resizeTextures = document.getElementById('opt-resize').checked;
+  const maxPx          = parseInt(document.getElementById('opt-max-size').value, 10);
+  const useDraco       = document.getElementById('opt-draco').checked;
+  const addMeta        = document.getElementById('opt-meta').checked;
+
+  btnConvert.disabled  = true;
+  btnConvert.textContent = '⏳ Converting…';
+  btnDownload.style.display = 'none';
+  btnDownload.disabled = true;
+  if (downloadUrl) { URL.revokeObjectURL(downloadUrl); downloadUrl = null; }
+
+  try {
+    log('─── Conversion started ───', 'info');
+    const t0  = Date.now();
+
+    let glb = await convertToGLB({ resizeTextures, maxPx, addMeta });
+    setProgress(90);
+
+    if (useDraco) {
+      log('Applying Draco compression…', 'info');
+      try {
+        glb = await applyDracoCompression(glb);
+      } catch (dracoErr) {
+        log(`Draco skipped: ${dracoErr.message}`, 'warn');
+      }
+    }
+
+    convertedGLB = glb;
+    setProgress(100);
+
+    const elapsed = ((Date.now() - t0) / 1000).toFixed(2);
+    log(`✔ Done in ${elapsed}s — output size: ${fmtSize(glb.byteLength)}`, 'success');
+
+    // Wire up download button
+    const stem       = findGltfFile().name.replace(/\.gltf$/i, '');
+    const blob       = new Blob([glb], { type: 'model/gltf-binary' });
+    downloadUrl      = URL.createObjectURL(blob);
+
+    btnDownload.style.display = 'inline-flex';
+    btnDownload.disabled      = false;
+    btnDownload.onclick       = () => {
+      const a  = document.createElement('a');
+      a.href   = downloadUrl;
+      a.download = `${stem}.glb`;
+      a.click();
+      log(`Downloaded ${stem}.glb`, 'success');
+    };
+
+    setTimeout(clearProgress, 800);
+  } catch (err) {
+    log(`Error: ${err.message}`, 'error');
+    console.error(err);
+    clearProgress();
+  } finally {
+    btnConvert.disabled    = false;
+    btnConvert.textContent = '⚡ Convert to GLB';
+  }
+});
+
+/* ── Sync resize-size row visibility ── */
+document.getElementById('opt-resize').addEventListener('change', e => {
+  document.getElementById('resize-size-row').style.opacity = e.target.checked ? '1' : '0.4';
+});
+</script>
+</body>
+</html>
