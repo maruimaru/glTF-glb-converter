@@ -170,4 +170,5 @@ A. `.glb` ファイルをiPad/Androidに転送する際は、AirDrop・Google Dr
 
 ## ライセンス
 
+MITライセンス
 このツールは自由に使用・改変・再配布できます。
